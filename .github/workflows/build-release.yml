@@ -43,7 +43,7 @@ jobs:
     # 定义当前任务 (build) 下需要按顺序执行的一系列步骤 (steps)
     steps:
       # 第一步：检出代码。使用官方的 checkout 动作 v3 版本，将代码库拉取到虚拟机的运行环境中
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       # 第二步：设置一个带有名称的步骤，用于缓存 Rust 的编译产物，加快后续构建速度
       - name: Cache rust build artifacts
@@ -116,7 +116,7 @@ jobs:
       # 第五步：设置名为 "Upload deb bundle" 的步骤，上传生成的 Debian 安装包 (.deb) 作为构建产物 (Artifact)
       - name: Upload deb bundle
         # 使用官方的 upload-artifact 动作 v3 版本来实现文件上传
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         # 传递给动作的参数
         with:
           # 指定上传的产物名称为 "Debian Bundle"
@@ -127,7 +127,7 @@ jobs:
       # 第六步：设置名为 "Upload rpm bundle" 的步骤，上传生成的 RPM 安装包 (.rpm) 作为构建产物 (Artifact)
       - name: Upload rpm bundle
         # 使用官方的 upload-artifact 动作 v3 版本来实现文件上传
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         # 传递给动作的参数
         with:
           # 指定上传的产物名称为 "RPM Bundle"
@@ -138,7 +138,7 @@ jobs:
       # 第七步：设置名为 "Upload appimage bundle" 的步骤，上传生成的 AppImage 便携包 作为构建产物 (Artifact)
       - name: Upload appimage bundle
         # 使用官方的 upload-artifact 动作 v3 版本来实现文件上传
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         # 传递给动作的参数
         with:
           # 指定上传的产物名称为 "AppImage Bundle"
