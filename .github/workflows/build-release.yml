@@ -42,18 +42,16 @@ jobs:
 
     # 定义当前任务 (build) 下需要按顺序执行的一系列步骤 (steps)
     steps:
-      # 第一步：检出代码。使用官方的 checkout 动作 v3 版本，将代码库拉取到虚拟机的运行环境中
+      # 第一步：检出代码。使用官方的 checkout 动作 v4 版本，将代码库拉取到虚拟机的运行环境中
       - uses: actions/checkout@v4
 
       # 第二步：设置一个带有名称的步骤，用于缓存 Rust 的编译产物，加快后续构建速度
+      # 因为我们要在 QEMU 的 ARM 容器里构建，GitHub 的缓存不一定能完美跨越容器边界生效，
+      # 但我们至少可以在外部缓存 src-tauri 的 target 目录
       - name: Cache rust build artifacts
-        # 使用第三方动作 Swatinem/rust-cache v2 版本来处理 Rust 缓存
         uses: Swatinem/rust-cache@v2
-        # 向上述动作传递参数
         with:
-          # 指定 Rust 工作区目录为 src-tauri
           workspaces: src-tauri
-          # 即使构建失败也保存缓存，以便下次可以重用已编译的部分
           cache-on-failure: true
 
       # 第三步：设置名为 "Build app" (构建应用) 的步骤，在模拟的 ARM 环境中执行构建
@@ -82,7 +80,19 @@ jobs:
             # 将 Cargo 拉取 crates.io 索引的协议设置为 sparse，解决 CI worker 在拉取注册表时卡住的问题
             export CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
+            # GitHub Actions 运行在国外，直接访问官方 crates.io 源通常不会慢，但如果因为 QEMU 或网络抖动慢，我们可以添加重试机制，或者依赖 actions/cache
+            # 不建议在 GitHub Actions (海外服务器) 里配置国内源 (如 rsproxy)，因为这会强制海外服务器访问国内节点，反而导致速度极慢。
+            # 为了加速构建：
+            # 1. 我们保留 cargo-binstall
+            # 2. 我们通过 --locked 和缓存机制加速 Cargo 依赖
+            
+            # 使用国内源在 GitHub Actions (位于美国/欧洲) 实际上会更慢！所以我撤销刚才配置国内源的代码，改为依靠缓存和优化环境。
+            
+            # 为了确保 apt 在 Ubuntu 的国外服务器跑得快，我们不用换源。
+            # 但我们需要关闭一些无用的安装步骤来节约时间。
+
             # 允许系统源信息的改变并更新 apt 软件包索引 (-y 表示自动同意)
+            # 在 GitHub Actions 海外节点无需换源，国内源反而会导致无法连接
             apt-get update -y --allow-releaseinfo-change
             # 自动移除系统中不再需要的依赖包 (-y 表示自动同意)
             apt-get autoremove -y
@@ -95,14 +105,20 @@ jobs:
             # 添加 wasm32-unknown-unknown 目标，这是编译 Leptos (WASM) 前端所必需的
             rustup target add wasm32-unknown-unknown
 
-            # 安装 cargo-binstall，用于快速安装预编译的 Rust 二进制工具，避免在 QEMU 模拟器中缓慢地从源码编译
+            # 为了加速构建，不再每次编译 trunk 和 tauri-cli，而是通过 binstall 拉取预编译的二进制包
+            # 注意：在 ARM 架构中，如果有预编译的包则秒开，如果没有会退回到源码编译
             curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 
-            # 使用 binstall 安装 trunk (Leptos 前端构建工具) 和 tauri-cli
+            # 使用 binstall 安装 trunk 和 tauri-cli
             cargo binstall -y trunk
             cargo binstall -y tauri-cli
 
-            # 执行 Tauri 的构建命令，Tauri 会自动根据配置先调用 trunk build --release，然后再打包应用
+            # 为了减少每次编译重新拉取所有依赖，我们可以配置 sccache 加速编译过程
+            apt-get install -y sccache
+            export RUSTC_WRAPPER=sccache
+            export SCCACHE_DIR=$HOME/.cache/sccache
+
+            # 执行 Tauri 的构建命令
             cargo tauri build --verbose
 
       # 第四步：设置步骤用于获取当前 Tauri 应用的版本号
