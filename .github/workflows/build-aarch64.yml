@@ -68,5 +68,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: aarch64-deb-package
-          path: src-tauri/target/release/bundle/deb/*.deb
+          path: src-tauri/target/**/*.deb
           if-no-files-found: error
