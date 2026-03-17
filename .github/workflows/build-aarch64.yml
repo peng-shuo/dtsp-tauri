@@ -21,66 +21,52 @@ jobs:
         with:
           platforms: arm64
 
-      - name: Build using Docker cross-compilation
+      - name: Build using Native arm64 Container (via QEMU)
         run: |
-          # 创建一个 Dockerfile，使用 amd64 宿主机并安装 aarch64 交叉编译工具链和依赖
-          cat << 'EOF' > Dockerfile.cross
-          FROM rust:bookworm
+          # 创建一个基于原生的 ARM64 系统的 Dockerfile
+          # 这能彻底避开交叉编译时的 apt 依赖树冲突问题
+          cat << 'EOF' > Dockerfile.arm64
+          FROM --platform=linux/arm64 rust:bookworm
 
           ENV DEBIAN_FRONTEND=noninteractive
 
-          # 更新源列表并安装依赖
-          # 注意：在 Debian bookworm 中 javascriptcoregtk 被包含在 libwebkit2gtk 的相关包中，或者名为 libjavascriptcoregtk-4.1-dev，
-          # 但跨架构安装有时候 apt 会遇到依赖冲突。如果 webkit2gtk 装了通常就包含了。
-          RUN dpkg --add-architecture arm64 && \
-              apt-get update && \
+          # 在原生的 arm64 系统中，直接安装常规依赖即可，无需指定 :arm64 后缀
+          RUN apt-get update && \
               apt-get install -y --no-install-recommends \
                   curl \
                   wget \
                   file \
                   build-essential \
-                  gcc-aarch64-linux-gnu \
-                  g++-aarch64-linux-gnu \
                   pkg-config \
                   libssl-dev \
-                  libglib2.0-dev:arm64 \
-                  libgtk-3-dev:arm64 \
-                  libsoup-3.0-dev:arm64 \
-                  libwebkit2gtk-4.1-dev:arm64 \
-                  libayatana-appindicator3-dev:arm64 \
-                  librsvg2-dev:arm64
+                  libglib2.0-dev \
+                  libgtk-3-dev \
+                  libwebkit2gtk-4.1-dev \
+                  libayatana-appindicator3-dev \
+                  librsvg2-dev \
+                  javascriptcoregtk-4.1 \
+                  libsoup-3.0-dev
 
           # 安装 WebAssembly 目标用于前端 Trunk 构建
           RUN rustup target add wasm32-unknown-unknown
-          
-          # 安装 aarch64 目标用于后端 Tauri 构建
-          RUN rustup target add aarch64-unknown-linux-gnu
 
           # 安装 Trunk 和 Tauri CLI (使用 cargo-binstall 加速)
           RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash && \
               cargo binstall -y trunk tauri-cli
 
-          # 设置交叉编译环境变量
-          ENV PKG_CONFIG_SYSROOT_DIR=/
-          ENV PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
-          ENV PKG_CONFIG_ALLOW_CROSS=1
-          ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-          ENV CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
-          ENV CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
-
           WORKDIR /workspace
           EOF
 
-          # 构建 Docker 镜像
-          docker build -t tauri-cross-aarch64 -f Dockerfile.cross .
+          # 使用 QEMU 构建原生 arm64 镜像
+          docker build --platform linux/arm64 -t tauri-native-arm64 -f Dockerfile.arm64 .
 
-          # 运行容器，在容器内执行打包
-          docker run --rm -v ${{ github.workspace }}:/workspace tauri-cross-aarch64 bash -c "\
-            cargo tauri build --target aarch64-unknown-linux-gnu --bundles deb"
+          # 运行 arm64 容器并在内部进行标准打包（不需要指定 target，因为系统本身就是 arm64）
+          docker run --rm --platform linux/arm64 -v ${{ github.workspace }}:/workspace tauri-native-arm64 bash -c "\
+            cargo tauri build --bundles deb"
 
       - name: Upload aarch64 artifact
         uses: actions/upload-artifact@v4
         with:
           name: aarch64-deb-package
-          path: src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb
+          path: src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error
