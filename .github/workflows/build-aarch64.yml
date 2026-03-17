@@ -25,7 +25,7 @@ jobs:
         run: |
           # 创建一个 Dockerfile，使用 amd64 宿主机并安装 aarch64 交叉编译工具链和依赖
           cat << 'EOF' > Dockerfile.cross
-          FROM rust:1.80-bookworm
+          FROM rust:bookworm
 
           ENV DEBIAN_FRONTEND=noninteractive
 
