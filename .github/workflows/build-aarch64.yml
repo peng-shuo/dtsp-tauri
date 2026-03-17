@@ -29,8 +29,11 @@ jobs:
 
           ENV DEBIAN_FRONTEND=noninteractive
 
-          # 添加 aarch64 架构支持
-          RUN dpkg --add-architecture arm64 && \
+          # 更新源列表（添加 debian arm64 源映射）
+          RUN echo "deb [arch=arm64] http://deb.debian.org/debian bookworm main" >> /etc/apt/sources.list && \
+              echo "deb [arch=arm64] http://deb.debian.org/debian bookworm-updates main" >> /etc/apt/sources.list && \
+              echo "deb [arch=arm64] http://security.debian.org/debian-security bookworm-security main" >> /etc/apt/sources.list && \
+              dpkg --add-architecture arm64 && \
               apt-get update && \
               apt-get install -y --no-install-recommends \
                   curl \
@@ -43,7 +46,7 @@ jobs:
                   libssl-dev \
                   libglib2.0-dev:arm64 \
                   libgtk-3-dev:arm64 \
-                  libwebkit2gtk-4.1-dev:arm64 \
+                  libwebkit2gtk-4.0-dev:arm64 \
                   libayatana-appindicator3-dev:arm64 \
                   librsvg2-dev:arm64
 
