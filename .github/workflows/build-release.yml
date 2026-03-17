@@ -1,0 +1,159 @@
+# 定义 GitHub Actions 工作流的名称，这里命名为 'Publish Linux Arm builds' (发布 Linux Arm 构建)
+name: 'Publish Linux Arm builds'
+
+# 定义触发此工作流的事件条件
+on:
+  # 允许在 GitHub Actions 页面上手动点击按钮触发此工作流
+  workflow_dispatch:
+  # 当代码被推送到仓库时触发此工作流
+  push:
+    # 限制只有当推送到特定的分支时才触发
+    branches:
+      # 具体指定推送到 'release' 分支时触发
+      - release
+
+# 定义该工作流中包含的所有任务 (jobs)
+jobs:
+  # 定义一个名为 'build' 的任务
+  build:
+    # 指定运行此任务的虚拟机操作系统环境为 Ubuntu 22.04
+    runs-on: ubuntu-22.04
+
+    # 定义矩阵构建策略，允许在不同的配置下并行运行同一个任务
+    strategy:
+      # 定义具体的矩阵配置
+      matrix:
+        # 定义一个名为 arch 的变量数组，包含 aarch64 (64位ARM) 和 armv7l (32位ARM) 两种架构
+        arch: [aarch64, armv7l]
+        # 使用 include 针对不同的架构配置附加的特定变量
+        include:
+          # 当 arch 为 aarch64 时的详细配置
+          - arch: aarch64
+            # 指定运行容器模拟的 CPU 类型为 cortex-a72
+            cpu: cortex-a72
+            # 指定用于模拟环境的基础系统镜像下载地址 (这里使用基于 Debian Bookworm 的 64位树莓派 5 镜像)
+            base_image: https://dietpi.com/downloads/images/DietPi_RPi5-ARMv8-Bookworm.img.xz
+            # 指定在 Debian (.deb) 包中使用的架构名称标识为 arm64
+            deb: arm64
+            # 指定在 RedHat (.rpm) 包中使用的架构名称标识为 aarch64
+            rpm: aarch64
+            # 指定在 AppImage 包中使用的架构名称标识为 aarch64
+            appimage: aarch64
+          # 当 arch 为 armv7l 时的详细配置
+          - arch: armv7l
+            # 指定运行容器模拟的 CPU 类型为 cortex-a53
+            cpu: cortex-a53
+            # 指定在 Debian (.deb) 包中使用的架构名称标识为 armhfp (硬件浮点)
+            deb: armhfp
+            # 指定在 RedHat (.rpm) 包中使用的架构名称标识为 arm
+            rpm: arm
+            # 指定在 AppImage 包中使用的架构名称标识为 armhf
+            appimage: armhf
+            # 指定用于模拟环境的基础系统镜像下载地址 (这里使用基于 Debian Bookworm 的 32位树莓派镜像)
+            base_image: https://dietpi.com/downloads/images/DietPi_RPi-ARMv7-Bookworm.img.xz
+
+    # 定义当前任务 (build) 下需要按顺序执行的一系列步骤 (steps)
+    steps:
+      # 第一步：检出代码。使用官方的 checkout 动作 v3 版本，将代码库拉取到虚拟机的运行环境中
+      - uses: actions/checkout@v3
+
+      # 第二步：设置一个带有名称的步骤，用于缓存 Rust 的编译产物，加快后续构建速度
+      - name: Cache rust build artifacts
+        # 使用第三方动作 Swatinem/rust-cache v2 版本来处理 Rust 缓存
+        uses: Swatinem/rust-cache@v2
+        # 向上述动作传递参数
+        with:
+          # 指定 Rust 工作区目录为 src-tauri
+          workspaces: src-tauri
+          # 即使构建失败也保存缓存，以便下次可以重用已编译的部分
+          cache-on-failure: true
+
+      # 第三步：设置名为 "Build app" (构建应用) 的步骤，在模拟的 ARM 环境中执行构建
+      - name: Build app
+        # 使用第三方动作 pguyot/arm-runner-action v2.6.5 版本，该动作可以通过 QEMU 模拟 ARM 环境
+        uses: pguyot/arm-runner-action@v2.6.5
+        # 向 arm-runner-action 传递配置参数
+        with:
+          # 传入矩阵中定义的 base_image 变量，设置模拟环境的基础系统镜像
+          base_image: ${{ matrix.base_image }}
+          # 传入矩阵中定义的 cpu 变量，设置模拟的 CPU 核心类型
+          cpu: ${{ matrix.cpu }}
+          # 设置为 true，将 GitHub Actions 当前的代码仓库目录绑定挂载到模拟器内部，以便直接访问代码
+          bind_mount_repository: true
+          # 给基础镜像额外增加 10240 MB (10GB) 的可用磁盘空间，防止编译时磁盘空间不足
+          image_additional_mb: 10240
+          # 设置不优化镜像，缩短 Action 启动时间
+          optimize_image: no
+          # 注释掉的配置项，可能用于控制失败时是否退出，默认为退出
+          #exit_on_fail: no
+          # 定义在模拟器内部实际执行的 Bash 命令脚本
+          commands: |
+            # 防止 Rust 在获取 HOME 环境变量时因为用户 ID 不匹配报错，将 HOME 强制设为 /root
+            export HOME=/root
+
+            # 将 Cargo 拉取 crates.io 索引的协议设置为 sparse，解决 CI worker 在拉取注册表时卡住的问题
+            export CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+
+            # 允许系统源信息的改变并更新 apt 软件包索引 (-y 表示自动同意)
+            apt-get update -y --allow-releaseinfo-change
+            # 自动移除系统中不再需要的依赖包 (-y 表示自动同意)
+            apt-get autoremove -y
+            # 安装构建 Tauri 必需的系统依赖库和工具 (包括 curl, webkit2gtk, rust 编译工具链相关依赖等)，不安装推荐或建议包
+            apt-get install -y --no-install-recommends --no-install-suggests curl libwebkit2gtk-4.1-dev build-essential libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 file
+            # 下载 rustup 安装脚本并以静默模式执行，安装默认的 Rust 工具链 (-y 表示自动同意配置)
+            curl https://sh.rustup.rs -sSf | sh -s -- -y
+            # 运行 Rust 环境变量配置脚本，使 cargo 和 rustc 等命令在当前终端立即生效
+            . "$HOME/.cargo/env"
+            # 添加 wasm32-unknown-unknown 目标，这是编译 Leptos (WASM) 前端所必需的
+            rustup target add wasm32-unknown-unknown
+
+            # 安装 cargo-binstall，用于快速安装预编译的 Rust 二进制工具，避免在 QEMU 模拟器中缓慢地从源码编译
+            curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+
+            # 使用 binstall 安装 trunk (Leptos 前端构建工具) 和 tauri-cli
+            cargo binstall -y trunk
+            cargo binstall -y tauri-cli
+
+            # 执行 Tauri 的构建命令，Tauri 会自动根据配置先调用 trunk build --release，然后再打包应用
+            cargo tauri build --verbose
+
+      # 第四步：设置步骤用于获取当前 Tauri 应用的版本号
+      - name: Get app version
+        # 运行 shell 命令：使用 jq 工具解析 src-tauri/tauri.conf.json 里的 version 字段，并拼接成 "APP_VERSION=版本号" 写入到 GITHUB_ENV 环境变量文件中，供后续步骤使用
+        run: echo "APP_VERSION=$(jq -r .version src-tauri/tauri.conf.json)" >> $GITHUB_ENV
+
+      # 待办事项注释：未来考虑将此工作流和基础的工作流合并，并将产生的文件上传到 GitHub Release 中。
+      # TODO: Combine this with the basic workflow and upload the files to the Release.
+      
+      # 第五步：设置名为 "Upload deb bundle" 的步骤，上传生成的 Debian 安装包 (.deb) 作为构建产物 (Artifact)
+      - name: Upload deb bundle
+        # 使用官方的 upload-artifact 动作 v3 版本来实现文件上传
+        uses: actions/upload-artifact@v3
+        # 传递给动作的参数
+        with:
+          # 指定上传的产物名称为 "Debian Bundle"
+          name: Debian Bundle
+          # 指定要上传的文件的具体路径：拼接工作区目录、构建输出路径、应用名称、动态版本号环境变量以及矩阵中的 deb 架构变量
+          path: ${{ github.workspace }}/src-tauri/target/release/bundle/deb/appname_${{ env.APP_VERSION }}_${{ matrix.deb }}.deb
+
+      # 第六步：设置名为 "Upload rpm bundle" 的步骤，上传生成的 RPM 安装包 (.rpm) 作为构建产物 (Artifact)
+      - name: Upload rpm bundle
+        # 使用官方的 upload-artifact 动作 v3 版本来实现文件上传
+        uses: actions/upload-artifact@v3
+        # 传递给动作的参数
+        with:
+          # 指定上传的产物名称为 "RPM Bundle"
+          name: RPM Bundle
+          # 指定要上传的文件的具体路径：拼接工作区目录、构建输出路径、应用名称、动态版本号环境变量以及矩阵中的 rpm 架构变量 (注意 rpm 版本号中间的 "-1." 是 tauri 生成 rpm 的默认格式)
+          path: ${{ github.workspace }}/src-tauri/target/release/bundle/rpm/appname-${{ env.APP_VERSION }}-1.${{ matrix.rpm }}.rpm
+
+      # 第七步：设置名为 "Upload appimage bundle" 的步骤，上传生成的 AppImage 便携包 作为构建产物 (Artifact)
+      - name: Upload appimage bundle
+        # 使用官方的 upload-artifact 动作 v3 版本来实现文件上传
+        uses: actions/upload-artifact@v3
+        # 传递给动作的参数
+        with:
+          # 指定上传的产物名称为 "AppImage Bundle"
+          name: AppImage Bundle
+          # 指定要上传的文件的具体路径：拼接工作区目录、构建输出路径、应用名称、动态版本号环境变量以及矩阵中的 appimage 架构变量
+          path: ${{ github.workspace }}/src-tauri/target/release/bundle/appimage/appname_${{ env.APP_VERSION }}_${{ matrix.appimage }}.AppImage
