@@ -32,7 +32,7 @@ RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ca
 WORKDIR /workspace
 
 # 提前把依赖配置复制进来，利用 Docker 缓存层缓存依赖下载和编译
-COPY Cargo.toml Cargo.lock Trunk.toml index.html styles.css ./
+COPY Cargo.toml Cargo.lock* Trunk.toml index.html styles.css ./
 COPY src-tauri/Cargo.toml src-tauri/Cargo.lock* ./src-tauri/
 COPY src-tauri/tauri.conf.json ./src-tauri/
 
