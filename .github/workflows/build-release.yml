@@ -23,8 +23,8 @@ jobs:
     strategy:
       # 定义具体的矩阵配置
       matrix:
-        # 定义一个名为 arch 的变量数组，包含 aarch64 (64位ARM) 和 armv7l (32位ARM) 两种架构
-        arch: [aarch64, armv7l]
+        # 定义一个名为 arch 的变量数组，仅包含 aarch64 (64位ARM) 架构
+        arch: [aarch64]
         # 使用 include 针对不同的架构配置附加的特定变量
         include:
           # 当 arch 为 aarch64 时的详细配置
@@ -39,18 +39,6 @@ jobs:
             rpm: aarch64
             # 指定在 AppImage 包中使用的架构名称标识为 aarch64
             appimage: aarch64
-          # 当 arch 为 armv7l 时的详细配置
-          - arch: armv7l
-            # 指定运行容器模拟的 CPU 类型为 cortex-a53
-            cpu: cortex-a53
-            # 指定在 Debian (.deb) 包中使用的架构名称标识为 armhfp (硬件浮点)
-            deb: armhfp
-            # 指定在 RedHat (.rpm) 包中使用的架构名称标识为 arm
-            rpm: arm
-            # 指定在 AppImage 包中使用的架构名称标识为 armhf
-            appimage: armhf
-            # 指定用于模拟环境的基础系统镜像下载地址 (这里使用基于 Debian Bookworm 的 32位树莓派镜像)
-            base_image: https://dietpi.com/downloads/images/DietPi_RPi-ARMv7-Bookworm.img.xz
 
     # 定义当前任务 (build) 下需要按顺序执行的一系列步骤 (steps)
     steps:
