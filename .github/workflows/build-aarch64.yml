@@ -56,8 +56,9 @@ jobs:
           # 安装 aarch64 目标用于后端 Tauri 构建
           RUN rustup target add aarch64-unknown-linux-gnu
 
-          # 安装 Trunk
-          RUN cargo install trunk
+          # 安装 Trunk 和 Tauri CLI (使用 cargo-binstall 加速)
+          RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash && \
+              cargo binstall -y trunk tauri-cli
 
           # 设置交叉编译环境变量
           ENV PKG_CONFIG_SYSROOT_DIR=/
