@@ -1,0 +1,52 @@
+FROM --platform=linux/arm64 rust:bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 在原生的 arm64 系统中，直接安装常规依赖即可
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl \
+        wget \
+        file \
+        build-essential \
+        pkg-config \
+        libssl-dev \
+        libglib2.0-dev \
+        libgtk-3-dev \
+        libwebkit2gtk-4.1-dev \
+        libayatana-appindicator3-dev \
+        librsvg2-dev \
+        javascriptcoregtk-4.1 \
+        libsoup-3.0-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# 安装 WebAssembly 目标用于前端 Trunk 构建
+RUN rustup target add wasm32-unknown-unknown
+
+# 安装 Trunk 和 Tauri CLI (使用 cargo-binstall 加速)
+RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash && \
+    cargo binstall -y trunk tauri-cli
+
+# 设置工作目录
+WORKDIR /workspace
+
+# 提前把依赖配置复制进来，利用 Docker 缓存层缓存依赖下载和编译
+COPY Cargo.toml Cargo.lock Trunk.toml index.html styles.css ./
+COPY src-tauri/Cargo.toml src-tauri/Cargo.lock* ./src-tauri/
+COPY src-tauri/tauri.conf.json ./src-tauri/
+
+# 创建一个假的 src 目录以便提前编译依赖 (Rust 的经典缓存技巧)
+RUN mkdir -p src src-tauri/src && \
+    echo "fn main() {}" > src/main.rs && \
+    echo "fn main() {}" > src-tauri/src/main.rs && \
+    echo "pub fn run() {}" > src-tauri/src/lib.rs && \
+    cargo build --manifest-path src-tauri/Cargo.toml --release || true && \
+    rm -rf src src-tauri/src
+
+# 现在复制完整的源代码
+COPY . .
+
+# 执行打包构建
+# 注意：在这里我们将环境变量改为了直接在构建时使用
+RUN cargo tauri build --bundles deb

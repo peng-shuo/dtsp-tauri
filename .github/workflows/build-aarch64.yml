@@ -11,62 +11,45 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static binfmt-support
-
-      - name: Setup multiarch Docker
+      - name: Setup QEMU
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
 
-      - name: Build using Native arm64 Container (via QEMU)
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build using Docker cross-compilation with Cache
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: .github/Dockerfile.aarch64
+          platforms: linux/arm64
+          load: true # 将构建好的镜像加载回本地 Docker
+          tags: tauri-native-arm64:latest
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/build-cache:aarch64
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}/build-cache:aarch64,mode=max
+          github-token: ${{ secrets.GITHUB_TOKEN }} # 用于读写 GHCR 缓存
+
+      - name: Extract DEB artifact from container
         run: |
-          # 创建一个基于原生的 ARM64 系统的 Dockerfile
-          # 这能彻底避开交叉编译时的 apt 依赖树冲突问题
-          cat << 'EOF' > Dockerfile.arm64
-          FROM --platform=linux/arm64 rust:bookworm
-
-          ENV DEBIAN_FRONTEND=noninteractive
-
-          # 在原生的 arm64 系统中，直接安装常规依赖即可，无需指定 :arm64 后缀
-          RUN apt-get update && \
-              apt-get install -y --no-install-recommends \
-                  curl \
-                  wget \
-                  file \
-                  build-essential \
-                  pkg-config \
-                  libssl-dev \
-                  libglib2.0-dev \
-                  libgtk-3-dev \
-                  libwebkit2gtk-4.1-dev \
-                  libayatana-appindicator3-dev \
-                  librsvg2-dev \
-                  javascriptcoregtk-4.1 \
-                  libsoup-3.0-dev
-
-          # 安装 WebAssembly 目标用于前端 Trunk 构建
-          RUN rustup target add wasm32-unknown-unknown
-
-          # 安装 Trunk 和 Tauri CLI (使用 cargo-binstall 加速)
-          RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash && \
-              cargo binstall -y trunk tauri-cli
-
-          WORKDIR /workspace
-          EOF
-
-          # 使用 QEMU 构建原生 arm64 镜像
-          docker build --platform linux/arm64 -t tauri-native-arm64 -f Dockerfile.arm64 .
-
-          # 运行 arm64 容器并在内部进行标准打包（不需要指定 target，因为系统本身就是 arm64）
-          docker run --rm --platform linux/arm64 -v ${{ github.workspace }}:/workspace tauri-native-arm64 bash -c "\
-            cargo tauri build --bundles deb"
+          # 1. 运行刚刚构建好并包含了编译产物的镜像
+          docker create --name extract_container tauri-native-arm64:latest
+          
+          # 2. 将容器内的编译产物拷贝到宿主机
+          # 注意：因为我们是把整个代码放进去编译的，产物在容器的 /workspace/src-tauri/target 下
+          mkdir -p ./dist_deb
+          docker cp extract_container:/workspace/src-tauri/target/ ./target_dump
+          
+          # 3. 寻找 deb 包并拷贝到明确的文件夹
+          find ./target_dump -name "*.deb" -exec cp {} ./dist_deb/ \;
+          
+          # 4. 清理容器
+          docker rm extract_container
 
       - name: Upload aarch64 artifact
         uses: actions/upload-artifact@v4
         with:
           name: aarch64-deb-package
-          path: src-tauri/target/**/*.deb
+          path: ./dist_deb/*.deb
           if-no-files-found: error
